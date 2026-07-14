@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 20% 99%;
+    --foreground: 240 20% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 20% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 20% 12%;
+    --primary: 250 84% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 16% 96%;
+    --secondary-foreground: 240 20% 20%;
+    --muted: 240 16% 96%;
+    --muted-foreground: 240 8% 46%;
+    --accent: 250 90% 96%;
+    --accent-foreground: 250 60% 40%;
+    --success: 152 60% 42%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 30 40% 15%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 16% 90%;
+    --input: 240 16% 90%;
+    --ring: 250 84% 60%;
+    --radius: 0.85rem;
+  }
+
+  .dark {
+    --background: 240 24% 8%;
+    --foreground: 240 12% 94%;
+    --card: 240 22% 11%;
+    --card-foreground: 240 12% 94%;
+    --popover: 240 22% 11%;
+    --popover-foreground: 240 12% 94%;
+    --primary: 252 90% 68%;
+    --primary-foreground: 240 30% 8%;
+    --secondary: 240 16% 18%;
+    --secondary-foreground: 240 12% 90%;
+    --muted: 240 16% 16%;
+    --muted-foreground: 240 10% 62%;
+    --accent: 250 40% 22%;
+    --accent-foreground: 250 90% 88%;
+    --success: 152 55% 48%;
+    --success-foreground: 240 30% 8%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 30 40% 12%;
+    --destructive: 0 70% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 14% 20%;
+    --input: 240 14% 22%;
+    --ring: 252 90% 68%;
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-br from-primary via-violet-500 to-fuchsia-500 bg-clip-text text-transparent;
+  }
+  .bg-grid {
+    background-image: radial-gradient(hsl(var(--border)) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .glass {
+    @apply bg-background/70 backdrop-blur-xl backdrop-saturate-150;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

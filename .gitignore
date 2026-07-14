@@ -1,0 +1,17 @@
+node_modules
+.pnpm-store
+dist
+.next
+out
+.turbo
+coverage
+*.log
+.env
+.env.local
+.env.*.local
+.DS_Store
+.vercel
+next-env.d.ts
+
+# Machine-local Claude Code config (keep launch.json, ignore personal settings)
+.claude/settings.local.json
