@@ -26,11 +26,16 @@ export const envSchema = z.object({
 
   MOCK_MODE: bool(false),
 
-  // Supabase
+  // Supabase. The Vercel↔Supabase integration injects its own names, so we
+  // accept both our canonical vars and the integration's (resolved in loadEnv).
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  SUPABASE_URL: z.string().url().optional(), // integration (server-side)
+  SUPABASE_ANON_KEY: z.string().optional(), // integration (server-side)
   DATABASE_URL: z.string().optional(),
+  POSTGRES_URL: z.string().optional(), // integration: pooled (pgbouncer)
+  POSTGRES_URL_NON_POOLING: z.string().optional(), // integration: direct (migrations)
 
   // Queue
   REDIS_URL: z.string().optional(),
@@ -79,7 +84,15 @@ export const envSchema = z.object({
     ),
 });
 
-export type Env = z.infer<typeof envSchema> & { mockMode: boolean };
+export type Env = z.infer<typeof envSchema> & {
+  mockMode: boolean;
+  /** Resolved runtime connection string (pooled) — for serverless queries. */
+  databaseUrl?: string;
+  /** Resolved direct connection string — for migrations (drizzle-kit). */
+  databaseUrlDirect?: string;
+  /** Resolved Supabase URL, from either naming scheme. */
+  supabaseUrl?: string;
+};
 
 let cached: Env | null = null;
 
@@ -92,11 +105,24 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new Error("Environment validation failed");
   }
   const data = parsed.data;
+
+  // Reconcile our canonical names with the Vercel↔Supabase integration's names.
+  const databaseUrl = data.DATABASE_URL || data.POSTGRES_URL || data.POSTGRES_URL_NON_POOLING;
+  const databaseUrlDirect = data.POSTGRES_URL_NON_POOLING || data.DATABASE_URL || data.POSTGRES_URL;
+  const supabaseUrl = data.NEXT_PUBLIC_SUPABASE_URL || data.SUPABASE_URL;
+
   // MOCK if explicitly requested, or if the minimum real stack is not configured.
-  const hasRealStack = Boolean(
-    data.NEXT_PUBLIC_SUPABASE_URL && data.ANTHROPIC_API_KEY && data.DATABASE_URL,
-  );
-  cached = { ...data, mockMode: data.MOCK_MODE || !hasRealStack };
+  const hasRealStack = Boolean(supabaseUrl && data.ANTHROPIC_API_KEY && databaseUrl);
+
+  cached = {
+    ...data,
+    // Backfill canonical fields so downstream code can read them uniformly.
+    DATABASE_URL: databaseUrl,
+    databaseUrl,
+    databaseUrlDirect,
+    supabaseUrl,
+    mockMode: data.MOCK_MODE || !hasRealStack,
+  };
   return cached;
 }
 

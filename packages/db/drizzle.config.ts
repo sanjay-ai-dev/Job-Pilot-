@@ -5,7 +5,10 @@ export default defineConfig({
   schema: "./src/schema.ts",
   out: "./migrations",
   dialect: "postgresql",
-  dbCredentials: { url: env.DATABASE_URL ?? "postgres://localhost:5432/jobpilot" },
+  // Migrations use the DIRECT (non-pooling) connection; pgbouncer can't run DDL.
+  dbCredentials: {
+    url: env.databaseUrlDirect ?? env.DATABASE_URL ?? "postgres://localhost:5432/jobpilot",
+  },
   verbose: true,
   strict: true,
 });
