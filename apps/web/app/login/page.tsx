@@ -2,12 +2,14 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Mail, ArrowRight, Loader2, KeyRound, ArrowLeft, ShieldCheck } from "lucide-react";
+import { Mail, ArrowRight, Loader2, KeyRound, ArrowLeft, ShieldCheck, Lock } from "lucide-react";
 import { Logo } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { authEnabled } from "@/lib/supabase/config";
+import { bootstrapProfile } from "./actions";
+import { cn } from "@/lib/utils";
 
 export default function LoginPage() {
   return (
@@ -17,16 +19,55 @@ export default function LoginPage() {
   );
 }
 
+type View = "password" | "code-email" | "code-verify";
+
 function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") ?? "/dashboard";
 
-  const [step, setStep] = useState<"email" | "code">("email");
+  const [view, setView] = useState<View>("password");
+  const [signup, setSignup] = useState(false);
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+
+  async function afterAuth() {
+    await bootstrapProfile().catch(() => {});
+    router.push(next);
+    router.refresh();
+  }
+
+  async function passwordSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    const supabase = createClient();
+    try {
+      if (signup) {
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        if (!data.session) {
+          setInfo("Account created. If email confirmation is on, confirm via the email; otherwise just sign in.");
+          setSignup(false);
+          return;
+        }
+        await afterAuth();
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        await afterAuth();
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function sendCode(e: React.FormEvent) {
     e.preventDefault();
@@ -34,20 +75,17 @@ function LoginInner() {
     setError(null);
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { shouldCreateUser: true },
-      });
+      const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
       if (error) throw error;
-      setStep("code");
+      setView("code-verify");
     } catch (err) {
-      setError((err as Error).message || "Couldn't send the code. Try again.");
+      setError((err as Error).message);
     } finally {
       setBusy(false);
     }
   }
 
-  async function verify(e: React.FormEvent) {
+  async function verifyCode(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
@@ -55,10 +93,9 @@ function LoginInner() {
       const supabase = createClient();
       const { error } = await supabase.auth.verifyOtp({ email, token: code, type: "email" });
       if (error) throw error;
-      router.push(next);
-      router.refresh();
+      await afterAuth();
     } catch (err) {
-      setError((err as Error).message || "Invalid code.");
+      setError((err as Error).message);
     } finally {
       setBusy(false);
     }
@@ -78,6 +115,15 @@ function LoginInner() {
     }
   }
 
+  const title =
+    view === "code-verify" ? "Check your email" : signup ? "Create your account" : "Sign in to JobPilot";
+  const subtitle =
+    view === "code-verify"
+      ? `Enter the 6-digit code sent to ${email}`
+      : signup
+        ? "Use an email and password to get started."
+        : "Welcome back — sign in to your copilot.";
+
   return (
     <div className="flex min-h-screen flex-col bg-muted/20">
       <header className="flex h-16 items-center justify-between border-b glass px-6">
@@ -92,79 +138,82 @@ function LoginInner() {
           <div className="rounded-2xl border bg-card p-8 shadow-sm">
             <div className="mb-6 text-center">
               <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-primary to-violet-600 text-white shadow-lg shadow-primary/30">
-                {step === "email" ? <Mail className="h-6 w-6" /> : <KeyRound className="h-6 w-6" />}
+                {view === "code-verify" ? <KeyRound className="h-6 w-6" /> : <Lock className="h-6 w-6" />}
               </div>
-              <h1 className="text-xl font-bold tracking-tight">
-                {step === "email" ? "Sign in to JobPilot" : "Check your email"}
-              </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {step === "email"
-                  ? "We'll email you a one-time code — no password needed."
-                  : `Enter the 6-digit code sent to ${email}`}
-              </p>
+              <h1 className="text-xl font-bold tracking-tight">{title}</h1>
+              <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
             </div>
 
             {!authEnabled && (
               <div className="mb-4 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
-                Auth isn't enabled on this deployment yet — you can explore the demo without signing in.
+                Auth isn&apos;t enabled on this deployment yet — you can explore the demo without signing in.
               </div>
             )}
 
-            {step === "email" ? (
-              <form onSubmit={sendCode} className="space-y-3">
-                <Input
-                  type="email"
-                  required
-                  placeholder="you@email.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoFocus
-                />
+            {view === "password" && (
+              <form onSubmit={passwordSubmit} className="space-y-3">
+                <Input type="email" required placeholder="you@email.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
+                <Input type="password" required placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={6} />
                 <Button type="submit" variant="gradient" className="w-full" disabled={busy || !authEnabled}>
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : (<>Send code <ArrowRight className="h-4 w-4" /></>)}
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : (<>{signup ? "Create account" : "Sign in"} <ArrowRight className="h-4 w-4" /></>)}
                 </Button>
-              </form>
-            ) : (
-              <form onSubmit={verify} className="space-y-3">
-                <Input
-                  inputMode="numeric"
-                  required
-                  placeholder="123456"
-                  maxLength={6}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                  className="text-center text-lg tracking-[0.4em]"
-                  autoFocus
-                />
-                <Button type="submit" variant="gradient" className="w-full" disabled={busy || code.length < 6}>
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify & continue"}
-                </Button>
-                <button
-                  type="button"
-                  className="w-full text-center text-xs text-muted-foreground hover:text-foreground"
-                  onClick={() => { setStep("email"); setCode(""); setError(null); }}
-                >
-                  Use a different email
+                <button type="button" className="w-full text-center text-xs text-muted-foreground hover:text-foreground" onClick={() => { setSignup((s) => !s); setError(null); setInfo(null); }}>
+                  {signup ? "Already have an account? Sign in" : "New here? Create an account"}
                 </button>
               </form>
             )}
 
-            {step === "email" && (
+            {view === "code-email" && (
+              <form onSubmit={sendCode} className="space-y-3">
+                <Input type="email" required placeholder="you@email.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
+                <Button type="submit" variant="gradient" className="w-full" disabled={busy || !authEnabled}>
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : (<>Email me a code <Mail className="h-4 w-4" /></>)}
+                </Button>
+              </form>
+            )}
+
+            {view === "code-verify" && (
+              <form onSubmit={verifyCode} className="space-y-3">
+                <Input inputMode="numeric" required placeholder="123456" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} className="text-center text-lg tracking-[0.4em]" autoFocus />
+                <Button type="submit" variant="gradient" className="w-full" disabled={busy || code.length < 6}>
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify & continue"}
+                </Button>
+              </form>
+            )}
+
+            {view !== "code-verify" && (
               <>
                 <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
                   <div className="h-px flex-1 bg-border" /> or <div className="h-px flex-1 bg-border" />
                 </div>
-                <Button variant="outline" className="w-full" onClick={google} disabled={busy || !authEnabled}>
-                  <GoogleIcon /> Continue with Google
-                </Button>
+                <div className="space-y-2">
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => { setView(view === "password" ? "code-email" : "password"); setError(null); setInfo(null); }}
+                    disabled={busy}
+                  >
+                    {view === "password" ? (<><Mail className="h-4 w-4" /> Email me a code instead</>) : (<><Lock className="h-4 w-4" /> Use a password instead</>)}
+                  </Button>
+                  <Button variant="outline" className="w-full" onClick={google} disabled={busy || !authEnabled}>
+                    <GoogleIcon /> Continue with Google
+                  </Button>
+                </div>
               </>
             )}
 
+            {view === "code-verify" && (
+              <button type="button" className="mt-3 w-full text-center text-xs text-muted-foreground hover:text-foreground" onClick={() => { setView("code-email"); setCode(""); setError(null); }}>
+                Use a different email
+              </button>
+            )}
+
+            {info && <p className="mt-3 text-center text-xs text-primary">{info}</p>}
             {error && <p className="mt-3 text-center text-xs text-destructive">{error}</p>}
           </div>
 
-          <p className="mt-4 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5" /> Passwordless & secure. We never post on your behalf.
+          <p className={cn("mt-4 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground")}>
+            <ShieldCheck className="h-3.5 w-3.5" /> Secure sign-in. We never post on your behalf.
           </p>
         </div>
       </div>
