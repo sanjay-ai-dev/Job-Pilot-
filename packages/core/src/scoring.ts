@@ -9,6 +9,7 @@ import {
   type RecruiterContact,
   type ResumeProfile,
 } from "./types";
+import { ResumeProfileSchema } from "./types";
 import { z } from "zod";
 import { completeJson } from "./llm";
 import { cosine, embedOne } from "./embeddings";
@@ -18,7 +19,53 @@ import {
   emailDraftPrompt,
   emailSystemPrompt,
   matchRerankPrompt,
+  resumeParsePrompt,
+  resumeParseSystemPrompt,
 } from "./prompts";
+
+/** Parse raw resume text into a structured profile (§6.2). */
+export async function parseResume(rawText: string): Promise<ResumeProfile> {
+  return completeJson(resumeParsePrompt(rawText), ResumeProfileSchema, {
+    system: resumeParseSystemPrompt,
+    model: "claude-sonnet-4-6",
+    temperature: 0,
+    mock: () => heuristicParse(rawText),
+  });
+}
+
+/** Canonical string embedded for matching (headline + skills + last 2 roles). */
+export function canonicalProfileString(p: ResumeProfile): string {
+  return [
+    p.headline,
+    p.skills.join(", "),
+    ...p.roles.slice(0, 2).map((r) => `${r.title} at ${r.company}: ${r.achievements.join(" ")}`),
+  ]
+    .filter(Boolean)
+    .join(". ");
+}
+
+/** Offline heuristic parser — used when no LLM key is present. */
+function heuristicParse(text: string): ResumeProfile {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const email = text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)?.[0] ?? null;
+  const phone = text.match(/(\+?\d[\d\s-]{8,}\d)/)?.[0] ?? null;
+  const KNOWN = ["Python","TypeScript","JavaScript","React","Next.js","Node.js","PostgreSQL","pgvector","LLMs","RAG","AWS","Docker","Kubernetes","Go","Java","SQL","GraphQL","FastAPI","PyTorch"];
+  const skills = KNOWN.filter((s) => new RegExp(`\\b${s.replace(/[.+]/g, "\\$&")}\\b`, "i").test(text));
+  const years = Number(text.match(/(\d+)\+?\s*years?/i)?.[1] ?? 0) || null;
+  return ResumeProfileSchema.parse({
+    name: lines[0] ?? null,
+    email,
+    phone,
+    headline: lines[1] ?? null,
+    total_experience_years: years,
+    skills,
+    tools: skills.filter((s) => ["Docker","Kubernetes","AWS"].includes(s)),
+    roles: [],
+    education: lines.filter((l) => /b\.?tech|b\.?e\.?|bachelor|master|university|college/i.test(l)).slice(0, 2),
+    certifications: [],
+    projects: [],
+  });
+}
 
 /** ATS scoring (§6.2 / §8.1) with a deterministic offline mock. */
 export async function scoreResume(

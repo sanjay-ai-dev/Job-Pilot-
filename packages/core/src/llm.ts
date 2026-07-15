@@ -2,13 +2,16 @@ import { env } from "@jobpilot/config/env";
 import { z } from "zod";
 
 /**
- * Single Anthropic client (§13.3). All LLM calls route through here: retry on
- * JSON-parse failure (one retry, error appended), and cost logging via the
- * injected `logEvent` sink (worker/web wire this to the `events` table).
+ * Single LLM client (§13.3). All LLM calls route through here: provider is
+ * OpenRouter (OpenAI-compatible) when OPENROUTER_API_KEY is set, else Anthropic
+ * direct, else the caller's mock. Retry on JSON-parse failure (one retry), and
+ * cost logging via the injected event sink (web/worker → `events` table).
+ * See DECISIONS.md D3.
  */
 export type ModelId = "claude-sonnet-4-6" | "claude-haiku-4-5-20251001";
 
 export interface LlmCallOptions {
+  /** Intent: the haiku id maps to the cheap model; anything else to primary. */
   model?: ModelId;
   system?: string;
   temperature?: number;
@@ -21,23 +24,63 @@ export function setLlmEventSink(sink: EventSink) {
   eventSink = sink;
 }
 
-// Rough INR cost per 1M tokens (input/output) for budget logging.
-const COST = {
+// Rough INR cost per 1M tokens for Anthropic-direct budget logging.
+const ANTHROPIC_COST: Record<ModelId, { in: number; out: number }> = {
   "claude-sonnet-4-6": { in: 250, out: 1250 },
   "claude-haiku-4-5-20251001": { in: 70, out: 350 },
-} as const;
+};
+
+const isCheap = (m?: ModelId) => m === "claude-haiku-4-5-20251001";
 
 /** Low-level text completion. Callers should prefer `completeJson`. */
 export async function completeText(prompt: string, opts: LlmCallOptions = {}): Promise<string> {
+  if (env.llmProvider === "openrouter") return openrouterText(prompt, opts);
+  if (env.llmProvider === "anthropic") return anthropicText(prompt, opts);
+  throw new Error("LLM called with no provider — callers must supply a mock path");
+}
+
+async function openrouterText(prompt: string, opts: LlmCallOptions): Promise<string> {
+  const model = isCheap(opts.model) ? env.llmModelCheap : env.llmModel;
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+      "HTTP-Referer": "https://jobpilot.app",
+      "X-Title": "JobPilot",
+    },
+    body: JSON.stringify({
+      model,
+      temperature: opts.temperature ?? 0.2,
+      max_tokens: opts.maxTokens ?? 2048,
+      messages: [
+        ...(opts.system ? [{ role: "system", content: opts.system }] : []),
+        { role: "user", content: prompt },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${await res.text()}`);
+  const json = (await res.json()) as {
+    choices: { message: { content: string } }[];
+    usage?: { prompt_tokens: number; completion_tokens: number; cost?: number };
+  };
+  await eventSink("llm_call", {
+    provider: "openrouter",
+    model,
+    input_tokens: json.usage?.prompt_tokens,
+    output_tokens: json.usage?.completion_tokens,
+    cost_usd: json.usage?.cost,
+  });
+  return json.choices[0]?.message?.content ?? "";
+}
+
+async function anthropicText(prompt: string, opts: LlmCallOptions): Promise<string> {
   const model = opts.model ?? "claude-sonnet-4-6";
-  if (env.mockMode || !env.ANTHROPIC_API_KEY) {
-    throw new Error("LLM called in mock mode — callers must supply a mock path");
-  }
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-api-key": env.ANTHROPIC_API_KEY,
+      "x-api-key": env.ANTHROPIC_API_KEY!,
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
@@ -53,13 +96,13 @@ export async function completeText(prompt: string, opts: LlmCallOptions = {}): P
     content: { text: string }[];
     usage: { input_tokens: number; output_tokens: number };
   };
-  const c = COST[model];
+  const c = ANTHROPIC_COST[model];
   await eventSink("llm_call", {
+    provider: "anthropic",
     model,
     input_tokens: json.usage.input_tokens,
     output_tokens: json.usage.output_tokens,
-    cost_inr:
-      (json.usage.input_tokens / 1e6) * c.in + (json.usage.output_tokens / 1e6) * c.out,
+    cost_inr: (json.usage.input_tokens / 1e6) * c.in + (json.usage.output_tokens / 1e6) * c.out,
   });
   return json.content.map((p) => p.text).join("");
 }
@@ -74,7 +117,7 @@ export async function completeJson<T>(
   schema: z.ZodType<T>,
   opts: LlmCallOptions & { mock: () => T },
 ): Promise<T> {
-  if (env.mockMode || !env.ANTHROPIC_API_KEY) {
+  if (!env.hasLlm) {
     return schema.parse(opts.mock());
   }
   const strict = `${prompt}\n\nRespond with a single JSON value only. No markdown fences, no prose.`;

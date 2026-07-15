@@ -28,6 +28,27 @@ driven by deterministic **mock adapters** and **seeded data** (working rule #4).
 
 **Not changed:** DB schema, plan limits (§10), adapter interface (§5), prompts (§8).
 
+## D3 — LLM provider: OpenRouter (default google/gemini-2.5-flash)
+**Context:** The spec fixed the LLM to the Anthropic API. The founder supplied an
+OpenRouter key and asked for the best affordable model.
+
+**Decision:** `packages/core/llm.ts` now routes through OpenRouter (OpenAI-compatible)
+when `OPENROUTER_API_KEY` is set, falling back to Anthropic-direct, then to the
+caller's deterministic mock. Default model `google/gemini-2.5-flash` (strong JSON
++ reasoning, large context for the 30-JD rerank, ~$0.00003/small call), overridable
+via `OPENROUTER_MODEL` / `OPENROUTER_MODEL_CHEAP`. Verified live: resume parse, ATS
+score, and match rerank all return schema-valid JSON. **No schema/prompt changes.**
+
+## D4 — Resume processing runs inline in a Next.js route (no BullMQ on Vercel)
+**Context:** Vercel has no Redis/worker. Spec §6.2 enqueues `resume:process`.
+
+**Decision:** `app/api/resume/process/route.ts` (nodejs runtime, maxDuration 60)
+does upload → text extract (`unpdf` for PDF, `mammoth` for DOCX) → parse → ATS
+score → embed → store, synchronously. Storage + `resumes` writes use a service-role
+client; reads use the RLS user client. The BullMQ processor remains for when a
+worker is deployed; behavior is identical (same `@jobpilot/core` functions). Scanned
+/image PDFs (no extractable text) return a friendly 422.
+
 ## D2 — shadcn/ui components hand-authored
 The shadcn CLI requires interactive init. To keep the build non-interactive and
 runnable, the handful of primitives used (Button, Card, Badge, Dialog, Slider,

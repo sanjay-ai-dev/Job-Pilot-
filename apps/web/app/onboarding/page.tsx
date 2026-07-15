@@ -7,6 +7,7 @@ import { Logo } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { saveOnboarding } from "./actions";
 
 const ROLES = ["AI Engineer", "Full Stack Developer", "Backend Engineer", "Frontend Engineer", "Data Scientist", "Product Manager", "DevOps Engineer", "ML Engineer"];
 const CITIES = ["Bengaluru", "Hyderabad", "Pune", "Gurugram", "Mumbai", "Chennai", "Noida", "Remote"];
@@ -28,10 +29,12 @@ export default function OnboardingPage() {
   }
 
   function finish() {
-    // Completing onboarding enqueues ingest:user-first-fetch (§6.1). We simulate
-    // the ~2-minute warm-up as a quick loading state, then land on the feed.
+    // Persist to profiles + saved_searches (no-op in the public demo), then land
+    // on the feed. In real mode this is where ingest:user-first-fetch is enqueued.
     setWarming(true);
-    setTimeout(() => router.push("/dashboard"), 2200);
+    void saveOnboarding({ roles, cities, experience: exp, expectedCtc: ctc, notice }).finally(() => {
+      setTimeout(() => router.push("/dashboard"), 1600);
+    });
   }
 
   const canNext = step === 0 ? roles.length > 0 : step === 1 ? cities.length > 0 : true;

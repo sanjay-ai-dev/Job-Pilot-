@@ -40,8 +40,12 @@ export const envSchema = z.object({
   // Queue
   REDIS_URL: z.string().optional(),
 
-  // LLM + embeddings
+  // LLM + embeddings. OpenRouter (OpenAI-compatible) is the primary provider;
+  // Anthropic-direct is still supported. See DECISIONS.md D3.
   ANTHROPIC_API_KEY: z.string().optional(),
+  OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_MODEL: z.string().optional(), // default: google/gemini-2.5-flash
+  OPENROUTER_MODEL_CHEAP: z.string().optional(), // default: google/gemini-2.5-flash-lite
   VOYAGE_API_KEY: z.string().optional(),
 
   // Job source APIs
@@ -86,6 +90,11 @@ export const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema> & {
   mockMode: boolean;
+  /** True when any real LLM provider (OpenRouter or Anthropic) is configured. */
+  hasLlm: boolean;
+  llmProvider: "openrouter" | "anthropic" | "mock";
+  llmModel: string;
+  llmModelCheap: string;
   /** Resolved runtime connection string (pooled) — for serverless queries. */
   databaseUrl?: string;
   /** Resolved direct connection string — for migrations (drizzle-kit). */
@@ -111,8 +120,19 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const databaseUrlDirect = data.POSTGRES_URL_NON_POOLING || data.DATABASE_URL || data.POSTGRES_URL;
   const supabaseUrl = data.NEXT_PUBLIC_SUPABASE_URL || data.SUPABASE_URL;
 
+  // LLM provider resolution (OpenRouter preferred). Independent of mockMode so
+  // real AI scoring works even while job adapters remain mocked.
+  const llmProvider: Env["llmProvider"] = data.OPENROUTER_API_KEY
+    ? "openrouter"
+    : data.ANTHROPIC_API_KEY
+      ? "anthropic"
+      : "mock";
+  const hasLlm = llmProvider !== "mock";
+  const llmModel = data.OPENROUTER_MODEL || "google/gemini-2.5-flash";
+  const llmModelCheap = data.OPENROUTER_MODEL_CHEAP || "google/gemini-2.5-flash-lite";
+
   // MOCK if explicitly requested, or if the minimum real stack is not configured.
-  const hasRealStack = Boolean(supabaseUrl && data.ANTHROPIC_API_KEY && databaseUrl);
+  const hasRealStack = Boolean(supabaseUrl && hasLlm && databaseUrl);
 
   cached = {
     ...data,
@@ -121,6 +141,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     databaseUrl,
     databaseUrlDirect,
     supabaseUrl,
+    hasLlm,
+    llmProvider,
+    llmModel,
+    llmModelCheap,
     mockMode: data.MOCK_MODE || !hasRealStack,
   };
   return cached;
