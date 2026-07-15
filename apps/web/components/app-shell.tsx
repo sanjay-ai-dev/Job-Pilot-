@@ -9,6 +9,7 @@ import {
   Menu,
   X,
   Check,
+  LogOut,
 } from "lucide-react";
 import { useState } from "react";
 import { Logo } from "@/components/brand";
@@ -25,7 +26,15 @@ const NAV = [
   { href: "/billing", label: "Billing", icon: CreditCard },
 ];
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  user = { name: "Priya Sharma", city: "Bengaluru" },
+  authEnabled = false,
+}: {
+  children: React.ReactNode;
+  user?: { name: string; city: string };
+  authEnabled?: boolean;
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const plan = useApp((s) => s.plan);
@@ -89,13 +98,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Badge>
             <div className="flex items-center gap-2">
               <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-primary to-violet-600 text-xs font-bold text-white">
-                {initials("Priya Sharma")}
+                {initials(user.name)}
               </div>
               <div className="hidden text-sm sm:block">
-                <div className="font-medium leading-tight">Priya Sharma</div>
-                <div className="text-xs text-muted-foreground">Bengaluru</div>
+                <div className="font-medium leading-tight">{user.name}</div>
+                <div className="text-xs text-muted-foreground">{user.city}</div>
               </div>
             </div>
+            {authEnabled && (
+              <form action="/auth/signout" method="post">
+                <Button type="submit" variant="ghost" size="icon" title="Sign out">
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </form>
+            )}
           </div>
         </header>
         <main className="animate-fade-up">{children}</main>
