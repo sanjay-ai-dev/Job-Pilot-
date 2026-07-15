@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
 
   // 5) Persist (previous version deactivated)
   await admin.from("resumes").update({ is_active: false }).eq("user_id", user.id).eq("is_active", true);
-  const { error: insErr } = await admin.from("resumes").insert({
+  const base = {
     user_id: user.id,
     version,
     storage_path: storagePath,
@@ -99,9 +99,15 @@ export async function POST(req: NextRequest) {
     parsed: profile,
     ats_score: ats.ats_score,
     ats_breakdown: ats,
-    embedding: embedding ? `[${embedding.join(",")}]` : null,
     is_active: true,
-  });
+  };
+  let { error: insErr } = await admin
+    .from("resumes")
+    .insert({ ...base, embedding: embedding ? `[${embedding.join(",")}]` : null });
+  if (insErr && embedding) {
+    // Retry without the vector so the ATS result still saves on any pgvector quirk.
+    ({ error: insErr } = await admin.from("resumes").insert(base));
+  }
   if (insErr) return NextResponse.json({ error: `DB: ${insErr.message}` }, { status: 500 });
 
   await admin.from("events").insert({ user_id: user.id, name: "resume_scored", props: { version, ats: ats.ats_score, targetRole } });
