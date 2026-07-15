@@ -25,12 +25,14 @@ interface Toast {
 
 interface AppState {
   matches: MatchView[];
+  realMode: boolean;
   filters: Filters;
   plan: PlanId;
   emailsSentToday: number;
   assistedAppliesToday: number;
   toasts: Toast[];
 
+  hydrate: (matches: MatchView[], realMode: boolean) => void;
   setFilter: <K extends keyof Filters>(key: K, value: Filters[K]) => void;
   resetFilters: () => void;
   setStatus: (matchId: string, status: MatchStatus) => void;
@@ -55,19 +57,28 @@ let toastSeq = 1;
 
 export const useApp = create<AppState>((set, get) => ({
   matches: buildDemoFeed(),
+  realMode: false,
   filters: DEFAULT_FILTERS,
   plan: "free",
   emailsSentToday: 0,
   assistedAppliesToday: 0,
   toasts: [],
 
+  hydrate: (matches, realMode) => set({ matches, realMode }),
   setFilter: (key, value) => set((s) => ({ filters: { ...s.filters, [key]: value } })),
   resetFilters: () => set({ filters: DEFAULT_FILTERS }),
 
-  setStatus: (matchId, status) =>
-    set((s) => ({
-      matches: s.matches.map((m) => (m.id === matchId ? { ...m, status } : m)),
-    })),
+  setStatus: (matchId, status) => {
+    set((s) => ({ matches: s.matches.map((m) => (m.id === matchId ? { ...m, status } : m)) }));
+    // Persist to Supabase when running on real data (fire-and-forget).
+    if (get().realMode) {
+      void fetch("/api/match/status", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ matchId, status }),
+      }).catch(() => {});
+    }
+  },
 
   setPlan: (plan) => set({ plan }),
 

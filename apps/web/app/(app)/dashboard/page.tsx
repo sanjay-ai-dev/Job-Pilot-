@@ -1,62 +1,79 @@
-"use client";
-import { useMemo } from "react";
-import { RefreshCw, Radar, SearchX } from "lucide-react";
-import { useApp, selectFeed } from "@/lib/store";
-import { FilterBar } from "@/components/feed/filter-bar";
-import { JobCard } from "@/components/feed/job-card";
-import { Button } from "@/components/ui/button";
+import type { MatchView } from "@jobpilot/core/types";
+import { authEnabled } from "@/lib/supabase/config";
+import { createClient, getUser } from "@/lib/supabase/server";
+import { FeedPage } from "@/components/feed/feed-page";
 
-export default function DashboardPage() {
-  const state = useApp();
-  const feed = useMemo(() => selectFeed(state), [state.matches, state.filters]);
+export const dynamic = "force-dynamic";
 
-  const freshCount = state.matches.filter(
-    (m) => Date.now() - +new Date(m.job.postedAt) < 24 * 3600 * 1000,
-  ).length;
+interface JobEmbed {
+  id: string;
+  title: string;
+  company: string;
+  locations: string[] | null;
+  remote: boolean | null;
+  description: string | null;
+  salary_min_lpa: string | number | null;
+  salary_max_lpa: string | number | null;
+  apply_url: string | null;
+  posted_at: string | null;
+  source: string;
+  meta: unknown;
+}
 
-  return (
-    <div className="container max-w-4xl space-y-5 py-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-            <Radar className="h-6 w-6 text-primary" /> Your Job Feed
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {feed.length} matches · <span className="text-success font-medium">{freshCount} new in the last 24h</span> · sorted newest first
-          </p>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
-          <RefreshCw className="h-3.5 w-3.5" /> Refresh
-        </Button>
-      </div>
+const num = (v: string | number | null) => (v == null ? null : Number(v));
 
-      <FilterBar />
+export default async function DashboardPage() {
+  if (!authEnabled) {
+    // Public demo — the store seeds itself with mock matches.
+    return <FeedPage initialMatches={[]} realMode={false} />;
+  }
 
-      {/* Feed */}
-      {feed.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed py-20 text-center">
-          <SearchX className="h-10 w-10 text-muted-foreground" />
-          <div>
-            <p className="font-medium">No jobs match these filters</p>
-            <p className="text-sm text-muted-foreground">Try widening the date range or lowering the match threshold.</p>
-          </div>
-          <Button variant="outline" size="sm" onClick={state.resetFilters}>
-            Reset filters
-          </Button>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {feed.map((m, i) => (
-            <div key={m.id} className="animate-fade-up" style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}>
-              <JobCard match={m} />
-            </div>
-          ))}
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            You&apos;re all caught up — new matches arrive every 4 hours ✨
-          </p>
-        </div>
-      )}
-    </div>
-  );
+  const user = await getUser();
+  let matches: MatchView[] = [];
+  if (user) {
+    try {
+      const supabase = await createClient();
+      const { data } = await supabase
+        .from("matches")
+        .select(
+          "id, similarity, match_score, match_reason, status, created_at, job:jobs(id, title, company, locations, remote, description, salary_min_lpa, salary_max_lpa, apply_url, posted_at, source, meta)",
+        )
+        .eq("user_id", user.id)
+        .neq("status", "dismissed")
+        .limit(200);
+
+      matches = (data ?? [])
+        .filter((m) => m.job)
+        .map((m): MatchView => {
+          const j = m.job as unknown as JobEmbed;
+          return {
+            id: m.id as string,
+            job: {
+              id: j.id,
+              dedupeHash: "",
+              source: j.source as MatchView["job"]["source"],
+              title: j.title,
+              company: j.company,
+              locations: j.locations ?? [],
+              remote: Boolean(j.remote),
+              description: j.description ?? undefined,
+              salaryMinLpa: num(j.salary_min_lpa),
+              salaryMaxLpa: num(j.salary_max_lpa),
+              applyUrl: j.apply_url ?? undefined,
+              postedAt: j.posted_at ?? (m.created_at as string),
+              meta: (j.meta as MatchView["job"]["meta"]) ?? undefined,
+            },
+            similarity: Number(m.similarity ?? 0),
+            matchScore: Number(m.match_score ?? 0),
+            matchReason: (m.match_reason as string) ?? "",
+            status: (m.status as MatchView["status"]) ?? "new",
+            createdAt: (m.created_at as string) ?? new Date().toISOString(),
+          };
+        });
+    } catch {
+      // matches/jobs tables not ready — show empty real feed.
+    }
+  }
+
+  return <FeedPage initialMatches={matches} realMode={true} />;
 }

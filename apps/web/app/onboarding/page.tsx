@@ -28,13 +28,17 @@ export default function OnboardingPage() {
     else if (arr.length < max) set([...arr, v]);
   }
 
-  function finish() {
-    // Persist to profiles + saved_searches (no-op in the public demo), then land
-    // on the feed. In real mode this is where ingest:user-first-fetch is enqueued.
+  async function finish() {
+    // Persist to profiles + saved_searches, then run the first fetch (§6.1) so
+    // the feed is warm on arrival. Both are no-ops/fast in the public demo.
     setWarming(true);
-    void saveOnboarding({ roles, cities, experience: exp, expectedCtc: ctc, notice }).finally(() => {
-      setTimeout(() => router.push("/dashboard"), 1600);
-    });
+    try {
+      await saveOnboarding({ roles, cities, experience: exp, expectedCtc: ctc, notice });
+      await fetch("/api/ingest/me", { method: "POST" });
+    } catch {
+      /* best-effort — land on the feed regardless */
+    }
+    router.push("/dashboard");
   }
 
   const canNext = step === 0 ? roles.length > 0 : step === 1 ? cities.length > 0 : true;
