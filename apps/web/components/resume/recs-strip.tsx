@@ -83,21 +83,27 @@ export function RecsStrip({ initial }: { initial: MatchView[] }) {
               </div>
 
               <div className="flex shrink-0 flex-col items-end gap-1.5">
-                <Button
-                  size="sm"
-                  variant={applied ? "success" : "gradient"}
-                  className="h-8 px-3 text-xs"
-                  asChild={Boolean(job.applyUrl) && !applied}
-                  onClick={() => !applied && setStatus(m, "applied")}
-                >
-                  {job.applyUrl && !applied ? (
-                    <a href={job.applyUrl} target="_blank" rel="noopener noreferrer">
-                      Apply <ExternalLink className="h-3 w-3" />
+                {job.applyUrl ? (
+                  <Button
+                    size="sm"
+                    variant={applied ? "success" : "gradient"}
+                    className="h-8 px-3 text-xs"
+                    asChild
+                  >
+                    <a
+                      href={job.applyUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => !applied && setStatus(m, "applied")}
+                    >
+                      {applied ? "Applied ✓" : (<>Apply <ExternalLink className="h-3 w-3" /></>)}
                     </a>
-                  ) : (
-                    <span>{applied ? "Applied ✓" : "Apply"}</span>
-                  )}
-                </Button>
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" className="h-8 px-3 text-xs" disabled title="No application link">
+                    No link
+                  </Button>
+                )}
                 {!applied && (
                   <button
                     onClick={() => setStatus(m, m.status === "saved" ? "new" : "saved")}

@@ -120,14 +120,14 @@ export async function POST(req: NextRequest) {
   try {
     let searches = await loadActiveSearches(user.id);
     // No onboarding yet? Auto-seed a default saved_search from the resume so
-    // ingestion has something to pull. User can refine later in /onboarding.
+    // ingestion has something to pull. Locations left empty on purpose so the
+    // ingest fan-out searches across all major India hubs.
     if (!searches.length) {
       const guessed = profile.headline || profile.roles[0]?.title || targetRole;
-      const guessedCity = profile.headline?.match(/(Bengaluru|Bangalore|Hyderabad|Pune|Gurugram|Mumbai|Chennai|Noida|Delhi|Remote)/i)?.[0] || "";
       await admin.from("saved_searches").insert({
         user_id: user.id,
         role_query: guessed,
-        locations: guessedCity ? [guessedCity] : [],
+        locations: [],
         remote_ok: true,
       });
       searches = await loadActiveSearches(user.id);

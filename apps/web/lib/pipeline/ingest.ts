@@ -25,6 +25,11 @@ export interface SavedSearchRow {
   max_experience: number | null;
 }
 
+/** Prominent India job hubs — used when a user has 0 or >1 cities set. */
+const MAJOR_CITIES = [
+  "Bengaluru", "Hyderabad", "Pune", "Gurugram", "Mumbai", "Chennai", "Noida", "Delhi",
+];
+
 /**
  * Ingestion (§6.3): fan out to enabled adapters for each saved search, dedupe by
  * hash, upsert into `jobs` with a 30-day expiry. In-process only — no embeddings
@@ -35,21 +40,49 @@ export async function ingestForSearches(searches: SavedSearchRow[]): Promise<{ f
   const byHash = new Map<string, NormalizedJob>();
 
   for (const s of searches) {
-    const q: SavedSearchQuery = {
-      id: s.id,
-      roleQuery: s.role_query,
-      locations: s.locations ?? [],
-      remoteOk: s.remote_ok ?? true,
-      minExperience: s.min_experience ?? undefined,
-      maxExperience: s.max_experience ?? undefined,
-    };
-    for (const adapter of ADAPTERS) {
-      if (!adapter.enabled()) continue;
-      try {
-        const jobs = await adapter.fetchJobs(q);
-        for (const j of jobs) if (!byHash.has(j.dedupeHash)) byHash.set(j.dedupeHash, j);
-      } catch (e) {
-        console.error(`[ingest] ${adapter.id} failed (isolated):`, (e as Error).message);
+    // Expand a saved_search into per-city queries so we get real coverage across
+    // major hubs (Adzuna doesn't OR locations). User-picked cities take priority;
+    // if the user selected none or many, fan out across MAJOR_CITIES.
+    const userCities = (s.locations ?? []).filter((c) => c && c.toLowerCase() !== "remote");
+    const cities = userCities.length >= 1 && userCities.length <= 2 ? userCities : MAJOR_CITIES;
+
+    // Cap concurrent Adzuna calls to stay well under free-tier rate limits.
+    for (const city of cities) {
+      const q: SavedSearchQuery = {
+        id: s.id,
+        roleQuery: s.role_query,
+        locations: [city],
+        remoteOk: s.remote_ok ?? true,
+        minExperience: s.min_experience ?? undefined,
+        maxExperience: s.max_experience ?? undefined,
+      };
+      for (const adapter of ADAPTERS) {
+        if (!adapter.enabled()) continue;
+        try {
+          const jobs = await adapter.fetchJobs(q);
+          for (const j of jobs) if (!byHash.has(j.dedupeHash)) byHash.set(j.dedupeHash, j);
+        } catch (e) {
+          console.error(`[ingest] ${adapter.id} ${city} failed:`, (e as Error).message);
+        }
+      }
+    }
+
+    // One extra pass for remote roles when the user is remote-open.
+    if (s.remote_ok !== false) {
+      const q: SavedSearchQuery = {
+        id: s.id,
+        roleQuery: `${s.role_query} remote`,
+        locations: [],
+        remoteOk: true,
+      };
+      for (const adapter of ADAPTERS) {
+        if (!adapter.enabled()) continue;
+        try {
+          const jobs = await adapter.fetchJobs(q);
+          for (const j of jobs) if (!byHash.has(j.dedupeHash)) byHash.set(j.dedupeHash, j);
+        } catch (e) {
+          console.error(`[ingest] ${adapter.id} remote failed:`, (e as Error).message);
+        }
       }
     }
   }

@@ -12,6 +12,9 @@ import {
   Sparkles,
   Building2,
   Wifi,
+  ChevronDown,
+  ChevronUp,
+  ShieldCheck,
 } from "lucide-react";
 import type { MatchView } from "@jobpilot/core/types";
 import { Button } from "@/components/ui/button";
@@ -36,6 +39,7 @@ export function JobCard({ match }: { match: MatchView }) {
   const [emailOpen, setEmailOpen] = useState(false);
   const [assistOpen, setAssistOpen] = useState(false);
   const [paywall, setPaywall] = useState<null | "email" | "assisted">(null);
+  const [expanded, setExpanded] = useState(false);
 
   const job = match.job;
   const contact = useMemo(() => findRecruiterContact(job.company), [job.company]);
@@ -43,12 +47,23 @@ export function JobCard({ match }: { match: MatchView }) {
   const applied = match.status === "applied" || match.status === "emailed";
 
   function apply() {
+    if (!job.applyUrl) {
+      pushToast("No application link on this posting yet");
+      return;
+    }
+    // Open the real posting first so we mark applied only when the user actually
+    // gets to the destination. Popup blockers require this to be inside the
+    // click handler (no awaits before window.open).
+    const opened = window.open(job.applyUrl, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      pushToast("Popup blocked — allow popups and try again");
+      return;
+    }
     setStatus(match.id, "applied");
-    pushToast(`Marked "${job.title}" as applied`, {
-      label: "Undo",
+    pushToast(`Opened ${job.company} — mark applied?`, {
+      label: "Not applied",
       run: () => setStatus(match.id, "new"),
     });
-    // Real: window.open(job.applyUrl, "_blank")
   }
 
   function save() {
@@ -127,10 +142,48 @@ export function JobCard({ match }: { match: MatchView }) {
             <span>{match.matchReason}</span>
           </p>
 
+          {/* Details toggle */}
+          {job.description && (
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              {expanded ? (
+                <>Hide details <ChevronUp className="h-3.5 w-3.5" /></>
+              ) : (
+                <>Read job description <ChevronDown className="h-3.5 w-3.5" /></>
+              )}
+            </button>
+          )}
+          {expanded && job.description && (
+            <div className="mt-2 animate-fade-up space-y-2 rounded-lg border bg-muted/30 p-3">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Job description</div>
+              <p className="whitespace-pre-line text-sm leading-relaxed text-foreground">
+                {job.description}
+              </p>
+              {job.applyUrl && (
+                <a
+                  href={job.applyUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 pt-1 text-xs font-medium text-primary hover:underline"
+                >
+                  View full posting on {SOURCE_LABEL[job.source] ?? job.source} <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+            </div>
+          )}
+
           {/* Actions */}
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Button size="sm" variant={applied ? "success" : "gradient"} onClick={apply}>
-              {applied ? "Applied ✓" : (<>Apply Now <ExternalLink className="h-3.5 w-3.5" /></>)}
+            <Button
+              size="sm"
+              variant={applied ? "success" : "gradient"}
+              onClick={apply}
+              disabled={!applied && !job.applyUrl}
+              title={!job.applyUrl ? "No application link on this posting" : undefined}
+            >
+              {applied ? "Applied ✓" : (<>Apply on {SOURCE_LABEL[job.source] ?? "posting"} <ExternalLink className="h-3.5 w-3.5" /></>)}
             </Button>
             <Button size="sm" variant="outline" onClick={onEmail}>
               <Mail className="h-3.5 w-3.5" /> Email
@@ -164,6 +217,11 @@ export function JobCard({ match }: { match: MatchView }) {
               </Button>
             </div>
           </div>
+
+          <p className="mt-2 flex items-center gap-1 text-[10.5px] text-muted-foreground">
+            <ShieldCheck className="h-3 w-3" />
+            Apply opens the original posting — we don&apos;t submit for you.
+          </p>
         </div>
       </div>
 
