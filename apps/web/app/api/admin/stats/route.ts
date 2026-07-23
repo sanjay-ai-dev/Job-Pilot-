@@ -75,14 +75,17 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminClient();
   try {
-    // Ensure the saved_search exists (upsert-like: skip if the exact role already exists).
+    // Upsert semantics: create if new, else refresh locations so the caller
+    // can widen or narrow city coverage in one hit.
     const { data: existing } = await admin
       .from("saved_searches")
       .select("id")
       .eq("user_id", userId)
       .eq("role_query", role)
       .maybeSingle();
-    if (!existing) {
+    if (existing) {
+      await admin.from("saved_searches").update({ locations, remote_ok: true, is_active: true }).eq("id", existing.id);
+    } else {
       await admin.from("saved_searches").insert({
         user_id: userId,
         role_query: role,
