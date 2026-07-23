@@ -1,13 +1,14 @@
 "use client";
 import { useRef, useState } from "react";
 import { UploadCloud, FileText, Lightbulb, CheckCircle2, History, Loader2, Target, AlertCircle } from "lucide-react";
-import type { AtsBreakdown } from "@jobpilot/core/types";
+import type { AtsBreakdown, MatchView } from "@jobpilot/core/types";
 import { ScoreRing } from "@/components/score-ring";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { RecsStrip } from "./recs-strip";
 
 const SECTION_META: Record<string, { label: string; weight: number }> = {
   keywords: { label: "Keywords", weight: 30 },
@@ -31,6 +32,7 @@ export function ResumeView({
   initialFileName,
   initialSkills,
   initialVersions,
+  initialRecs = [],
 }: {
   mode: "real" | "demo";
   targetRole: string;
@@ -38,11 +40,13 @@ export function ResumeView({
   initialFileName: string | null;
   initialSkills: string[];
   initialVersions: VersionRow[];
+  initialRecs?: MatchView[];
 }) {
   const [ats, setAts] = useState<AtsBreakdown | null>(initialAts);
   const [fileName, setFileName] = useState<string | null>(initialFileName);
   const [skills, setSkills] = useState<string[]>(initialSkills);
   const [versions, setVersions] = useState<VersionRow[]>(initialVersions);
+  const [recs, setRecs] = useState<MatchView[]>(initialRecs);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -74,6 +78,7 @@ export function ResumeView({
       setAts(data.ats_breakdown as AtsBreakdown);
       setFileName(data.fileName);
       setSkills((data.skills as string[]) ?? skills);
+      if (Array.isArray(data.recs)) setRecs(data.recs as MatchView[]);
       setVersions((v) => [
         { version: data.version, score: data.ats_score, date: "Just now", active: true },
         ...v.map((x) => ({ ...x, active: false })),
@@ -169,6 +174,9 @@ export function ResumeView({
         </Card>
       ) : (
         <>
+          {/* Recommended jobs — shown right after the score, ahead of section detail */}
+          {recs.length > 0 && <RecsStrip initial={recs} />}
+
           {/* Section breakdown */}
           <Card className="p-6">
             <h2 className="mb-4 text-sm font-semibold">Section breakdown</h2>

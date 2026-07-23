@@ -3,6 +3,9 @@ import { parseResume, scoreResume, canonicalProfileString, embedOne } from "@job
 import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { authEnabled } from "@/lib/supabase/config";
+import { ingestForSearches, loadActiveSearches } from "@/lib/pipeline/ingest";
+import { matchForUser } from "@/lib/pipeline/match";
+import { loadTopRecs } from "@/lib/pipeline/recs";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -112,6 +115,17 @@ export async function POST(req: NextRequest) {
 
   await admin.from("events").insert({ user_id: user.id, name: "resume_scored", props: { version, ats: ats.ats_score, targetRole } });
 
+  // Run the match pipeline inline so recommended jobs are ready by the time the
+  // ATS score is shown. Ingestion is best-effort (skip if it takes too long).
+  try {
+    const searches = await loadActiveSearches(user.id);
+    if (searches.length) await ingestForSearches(searches);
+    await matchForUser(user.id);
+  } catch (e) {
+    console.error("[resume/process] recs pipeline (non-fatal):", (e as Error).message);
+  }
+  const recs = await loadTopRecs(user.id, 5).catch(() => []);
+
   return NextResponse.json({
     version,
     targetRole,
@@ -119,6 +133,7 @@ export async function POST(req: NextRequest) {
     ats_breakdown: ats,
     skills: profile.skills,
     fileName: file.name,
+    recs,
   });
 }
 

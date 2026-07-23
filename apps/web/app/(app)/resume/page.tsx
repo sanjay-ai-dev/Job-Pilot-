@@ -1,14 +1,16 @@
-import type { AtsBreakdown } from "@jobpilot/core/types";
+import type { AtsBreakdown, MatchView } from "@jobpilot/core/types";
 import { authEnabled } from "@/lib/supabase/config";
 import { createClient, getUser } from "@/lib/supabase/server";
-import { DEMO_ATS, DEMO_PROFILE, TARGET_ROLE } from "@/lib/data";
+import { DEMO_ATS, DEMO_PROFILE, TARGET_ROLE, buildDemoFeed } from "@/lib/data";
 import { ResumeView, type VersionRow } from "@/components/resume/resume-view";
+import { loadTopRecsForCurrentUser } from "@/lib/pipeline/recs";
 
 export const dynamic = "force-dynamic";
 
 export default async function ResumePage() {
   if (!authEnabled) {
-    // Public demo — deterministic mock ATS.
+    // Public demo — deterministic mock ATS + top-5 mock matches.
+    const demoRecs = buildDemoFeed().sort((a, b) => b.matchScore - a.matchScore).slice(0, 5);
     return (
       <ResumeView
         mode="demo"
@@ -20,6 +22,7 @@ export default async function ResumePage() {
           { version: 2, score: DEMO_ATS.ats_score, date: "Today", active: true },
           { version: 1, score: 71, date: "3 days ago", active: false },
         ]}
+        initialRecs={demoRecs}
       />
     );
   }
@@ -30,6 +33,7 @@ export default async function ResumePage() {
   let skills: string[] = [];
   let versions: VersionRow[] = [];
   let targetRole = "Software Engineer";
+  let recs: MatchView[] = [];
 
   if (user) {
     try {
@@ -61,6 +65,7 @@ export default async function ResumePage() {
           active: Boolean(r.is_active),
         }));
       }
+      if (ats) recs = await loadTopRecsForCurrentUser(user.id, 5).catch(() => []);
     } catch {
       // Table not created yet (migration pending) — show the empty upload state.
     }
@@ -74,6 +79,7 @@ export default async function ResumePage() {
       initialFileName={fileName}
       initialSkills={skills}
       initialVersions={versions}
+      initialRecs={recs}
     />
   );
 }
