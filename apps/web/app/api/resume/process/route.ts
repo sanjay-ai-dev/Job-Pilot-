@@ -118,7 +118,20 @@ export async function POST(req: NextRequest) {
   // Run the match pipeline inline so recommended jobs are ready by the time the
   // ATS score is shown. Ingestion is best-effort (skip if it takes too long).
   try {
-    const searches = await loadActiveSearches(user.id);
+    let searches = await loadActiveSearches(user.id);
+    // No onboarding yet? Auto-seed a default saved_search from the resume so
+    // ingestion has something to pull. User can refine later in /onboarding.
+    if (!searches.length) {
+      const guessed = profile.headline || profile.roles[0]?.title || targetRole;
+      const guessedCity = profile.headline?.match(/(Bengaluru|Bangalore|Hyderabad|Pune|Gurugram|Mumbai|Chennai|Noida|Delhi|Remote)/i)?.[0] || "";
+      await admin.from("saved_searches").insert({
+        user_id: user.id,
+        role_query: guessed,
+        locations: guessedCity ? [guessedCity] : [],
+        remote_ok: true,
+      });
+      searches = await loadActiveSearches(user.id);
+    }
     if (searches.length) await ingestForSearches(searches);
     await matchForUser(user.id);
   } catch (e) {
